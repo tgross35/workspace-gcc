@@ -1,13 +1,11 @@
-source_dir := justfile_directory() / "llvm-project"
-build_dir := justfile_directory() / "llvm-build"
+source_dir := justfile_directory() / "gcc"
+build_dir := justfile_directory() / "gcc-build"
 install_dir := justfile_directory() / "local-install"
 config_hash_file := build_dir / ".configure-hash"
 bin_dir := build_dir / "bin"
-targets := "AArch64;X86"
 launcher := "ccache"
 
 # Prefer mold then lld if available
-[unix]
 default_linker_arg := ```
 	link_arg=""
 	if which mold > /dev/null 2> /dev/null; then
@@ -26,11 +24,10 @@ default:
 alias cfg := configure
 
 # Configure CMake
-[unix]
-configure build-type="Debug" projects="clang":
+configure languages="c,c++,rust":
 	#!/bin/sh
 	# Hash all configurable parts 
-	hash="{{ sha256(source_dir + build_dir + build-type + install_dir + projects + linker_arg + launcher) }}"
+	hash="{{ sha256(source_dir + build_dir + languages + install_dir + linker_arg + launcher) }}"
 	if [ "$hash" = "$(cat '{{config_hash_file}}')" ]; then
 		echo configuration up to date, skipping
 		exit
@@ -40,47 +37,24 @@ configure build-type="Debug" projects="clang":
 
 	printf "$hash" > "{{ config_hash_file }}"
 
-	cmake "-S{{ source_dir }}/llvm" "-B{{ build_dir }}" \
-		-G Ninja \
-		-DCMAKE_C_COMPILER_LAUNCHER={{ launcher }}\
-		-DCMAKE_CXX_COMPILER_LAUNCHER={{ launcher }}\
-		-DCMAKE_EXPORT_COMPILE_COMMANDS=true \
-		"-DCMAKE_BUILD_TYPE={{ build-type }}" \
-		"-DCMAKE_INSTALL_PREFIX={{ install_dir }}" \
-		"-DLLVM_ENABLE_PROJECTS={{ projects }}" \
-		"-DLLVM_TARGETS_TO_BUILD={{ targets }}" \
-		"{{linker_arg}}"
+	mkdir "{{ build_dir }}"
+	cd "{{ build_dir }}"
 
-# Configure CMake
-[windows]
-configure build-type="Debug" projects="clang":
-	# Windows seems to require the host triple be set
-	cmake "-S{{ source_dir }}/llvm" "-B{{ build_dir }}" \
-		-G Ninja \
-		-DCMAKE_C_COMPILER_LAUNCHER={{ launcher }}\
-		-DCMAKE_CXX_COMPILER_LAUNCHER={{ launcher }}\
-		-DCMAKE_EXPORT_COMPILE_COMMANDS=true \
-		"-DCMAKE_BUILD_TYPE={{ build-type }}" \
-		"-DCMAKE_INSTALL_PREFIX={{ install_dir }}" \
-		"-DLLVM_ENABLE_PROJECTS={{ projects }}" \
-		"-DLLVM_TARGETS_TO_BUILD={{ targets }}" \
-		"-DLLVM_HOST_TRIPLE=x86_64-pc-windows-msvc" \
-		"{{linker_arg}}"
+	"{{ source_dir }}/configure" \
+		--enable-multilib \
+		"--prefix={{ install_dir }}" \
+		"--enable-languages={{ languages }}"
 
 alias b := build
 
 # Build the project
 build: configure
-	cmake --build "{{ build_dir }}"
+	make -C "{{ build_dir }}" "-j{{ num_cpus() }}"
 
 # Clean the build directory
 clean:
-	cmake --build "{{ build_dir }}" --target clean
-
-# Run the LLVM test suite. Does not rebuild/reconfigure
-test-llvm: build
-	ninja -C "{{ build_dir }}" check-llvm
-	# cmake "{{ build_dir }}" check-llvm
+	rm -rf "{{ build_dir }}"
+	mkdir "{{ build_dir }}"
 
 # Run the complete test suite. Does not rebuild/reconfigure
 test: build
@@ -89,7 +63,7 @@ test: build
 
 # Install to the provided prefix. Does not rebuild/reconfigure
 install: build
-	cmake "{{ build_dir }}" install
+	make -C "{{ build_dir }}" install
 
 # Run Lit on the specified files
 lit +testfiles: build
@@ -102,10 +76,6 @@ bindir:
 # Launch a binary with the given name
 bin binname *binargs:
 	"{{ bin_dir }}/{{ binname }}" {{ binargs }}
-
-# Run the code formatter
-fmt *args:
-	"{{ source_dir }}/llvm/utils/git/code-format-helper.py" {{ args }}
 
 # Symlink configuration so C language servers work correctly
 configure-clangd: configure
