@@ -41,6 +41,7 @@ configure languages="c,c++,rust":
 	cd "{{ build_dir }}"
 
 	"{{ source_dir }}/configure" \
+		"CC={{ launcher }} gcc" \
 		--enable-multilib \
 		"--prefix={{ install_dir }}" \
 		"--enable-languages={{ languages }}"
@@ -51,23 +52,22 @@ alias b := build
 build: configure
 	make -C "{{ build_dir }}" "-j{{ num_cpus() }}"
 
+# Install to the provided prefix. Does not rebuild/reconfigure
+install: build
+	make -C "{{ build_dir }}" install
+
 # Clean the build directory
 clean:
 	rm -rf "{{ build_dir }}"
 	mkdir "{{ build_dir }}"
 
-# Run the complete test suite. Does not rebuild/reconfigure
-test: build
-	ninja -C "{{ build_dir }}" check-all
-	# cmake "{{ build_dir }}" check-all
+# Run tests on the specified files. Does not rebuild
+test *testfiles:
+	make -C "{{ build_dir }}" -k check "-j{{ num_cpus() }}"
 
-# Install to the provided prefix. Does not rebuild/reconfigure
-install: build
-	make -C "{{ build_dir }}" install
-
-# Run Lit on the specified files
-lit +testfiles: build
-	"{{ bin_dir }}/llvm-lit" -v {{ testfiles }}
+# Run gcc tests
+test-gcc *options:
+	make -C "{{ build_dir }}" check-gcc RUNTESTFLAGS="{{ options }}" "-j{{ num_cpus() }}"
 
 # Print the location of built binaries
 bindir:
