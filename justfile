@@ -21,6 +21,98 @@ linker_arg := if linker == "" { "" } else { "-DLLVM_USE_LINKER=" + linker }
 default:
 	"{{ just_executable() }}" --list
 
+mingw_arch := "x86_64-w64-mingw32"
+mingw_version := "12.0.0"
+mingw_dl := justfile_directory() / "mingw-w64.tar.bz2"
+mingw_src := justfile_directory() / "mingw-w64-v" + mingw_version
+mingw_build := justfile_directory() / "mingw-build"
+mingw_bootstrap := justfile_directory() / "bootstrap"
+mingw_prefix := justfile_directory() / "mingw-prefix"
+mingw_gcc_build := justfile_directory() / "mingw-gcc-build"
+
+mingw-setup:
+	#!/bin/bash
+	set -ex
+	curl -L -o "{{ mingw_dl }}" \
+		"https://downloads.sourceforge.net/project/mingw-w64/mingw-w64/mingw-w64-release/mingw-w64-v{{ mingw_version }}.tar.bz2"
+	tar xjf mingw-w64.tar.bz2
+
+mingw-headers:
+	#!/bin/bash
+	set -ex
+	mkdir -p "{{ mingw_build }}/headers"
+	cd "{{ mingw_build }}/headers"
+	{{ mingw_src }}/mingw-w64-headers/configure \
+		--prefix={{ mingw_bootstrap }}/{{ mingw_arch }} \
+		--host={{ mingw_arch }} \
+		--with-default-msvcrt=msvcrt-os
+	make "-j{{ num_cpus() }}"
+	make install
+	cd "{{ mingw_bootstrap }}"
+	ln -s "{{ mingw_arch }}" mingw
+
+mingw-gcc:
+	mkdir -p "{{ mingw_gcc_build }}"
+	cd "{{ mingw_gcc_build }}"
+	"{{ source_dir }}"/configure \
+        --prefix={{ mingw_bootstrap }} \
+        --with-sysroot={{ mingw_bootstrap }} \
+        --target={{ mingw_arch }} \
+        --enable-static \
+        --disable-shared \
+        --with-pic \
+        --enable-languages=c,c++,fortran \
+        --enable-libgomp \
+        --enable-threads=posix \
+        --enable-version-specific-runtime-libs \
+        --disable-dependency-tracking \
+        --disable-nls \
+        --disable-lto \
+        --disable-multilib \
+        CFLAGS_FOR_TARGET="-Os" \
+        CXXFLAGS_FOR_TARGET="-Os" \
+        LDFLAGS_FOR_TARGET="-s" \
+        CFLAGS="-Os" \
+        CXXFLAGS="-Os" \
+        LDFLAGS="-s"
+
+	make "-j{{ num_cpus() }}" all-gcc
+	make install-gcc
+
+set_bootstrap_path := "export PATH=" + mingw_bootstrap + "/bin:${PATH}"
+
+configure-thing:
+	#!/bin/bash
+
+	{{ set_bootstrap_path }}
+	mkdir -p {{ mingw_prefix / mingw_arch / "lib" }}
+	CC={{ mingw_arch }}-gcc DESTDIR={{ mingw_prefix }}/{{ mingw_arch }}/lib/ sh {{ mingw_prefix }}/src/libmemory.c
+	ln {{ mingw_prefix }}/{{ mingw_arch }}/lib/libmemory.a /bootstrap/{{ mingw_arch }}/lib/
+	CC={{ mingw_arch }}-gcc DESTDIR={{ mingw_prefix }}/{{ mingw_arch }}/lib/ sh {{ mingw_prefix }}/src/libchkstk.S
+	ln {{ mingw_prefix }}/{{ mingw_arch }}/lib/libchkstk.a /bootstrap/{{ mingw_arch }}/lib/
+
+
+mingw-crt:
+	#!/bin/bash
+	set -ex
+
+	{{ set_bootstrap_path }}
+	mkdir -p "{{ mingw_build }}/crt"
+	cd "{{ mingw_build }}/crt"
+	{{ mingw_src }}/mingw-w64-crt/configure \
+        --prefix={{ mingw_bootstrap }}/{{ mingw_arch }} \
+        --with-sysroot={{ mingw_bootstrap }}/{{ mingw_arch }} \
+        --host={{ mingw_arch }} \
+        --with-default-msvcrt=msvcrt-os \
+        --disable-dependency-tracking \
+        --disable-lib32 \
+        --enable-lib64 \
+        CFLAGS="-Os" \
+        LDFLAGS="-s" \
+
+	make -j$(nproc)
+	make install
+
 alias cfg := configure
 
 # Configure CMake
