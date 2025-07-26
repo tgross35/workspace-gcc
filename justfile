@@ -25,8 +25,11 @@ alias cfg := configure
 
 # Configure CMake
 configure languages="c,c++,rust":
-	#!/bin/sh
-	# Hash all configurable parts 
+	#!/bin/bash
+
+	set -ex
+
+	# Hash all configurable parts
 	hash="{{ sha256(source_dir + build_dir + languages + install_dir + linker_arg + launcher) }}"
 	if [ "$hash" = "$(cat '{{config_hash_file}}')" ]; then
 		echo configuration up to date, skipping
@@ -35,16 +38,27 @@ configure languages="c,c++,rust":
 		echo config outdated, rerunning
 	fi
 
-	printf "$hash" > "{{ config_hash_file }}"
+	args=("--prefix={{ install_dir }}" "--enable-languages={{ languages }}")
 
-	mkdir "{{ build_dir }}"
+	if [ "$(uname -o)" = "Darwin" ]; then
+		lib_root="/opt/homebrew/Cellar"
+		gmp_version="$(ls "$lib_root/gmp/" | head -n1)"
+		mpc_version="$(ls "$lib_root/libmpc/" | head -n1)"
+		mpfr_version="$(ls "$lib_root/mpfr/" | head -n1)"
+		args+=("-with-gmp=$lib_root/gmp/$gmp_version")
+		args+=("-with-mpc=$lib_root/libmpc/$mpc_version")
+		args+=("-with-mpfr=$lib_root/mpfr/$mpfr_version")
+	fi
+
+	mkdir -p "{{ build_dir }}"
 	cd "{{ build_dir }}"
 
 	"{{ source_dir }}/configure" \
 		"CC={{ launcher }} gcc" \
 		--enable-multilib \
-		"--prefix={{ install_dir }}" \
-		"--enable-languages={{ languages }}"
+		"${args[@]}"
+
+	printf "$hash" > "{{ config_hash_file }}"
 
 alias b := build
 
