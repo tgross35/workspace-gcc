@@ -161,7 +161,7 @@ configure target="" languages="c,c++,rust":
 alias b := build
 
 # Build the project
-build: configure
+build:
 	make -C "{{ build_dir }}" "-j{{ num_cpus() }}"
 
 # Install to the provided prefix. Does not rebuild/reconfigure
