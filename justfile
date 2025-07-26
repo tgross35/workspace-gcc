@@ -6,16 +6,19 @@ bin_dir := build_dir / "bin"
 launcher := "ccache"
 
 # Prefer mold then lld if available
-default_linker_arg := ```
-	link_arg=""
+linker := ```
 	if which mold > /dev/null 2> /dev/null; then
 		echo "mold"
 	elif which lld >/dev/null 2> /dev/null; then
 		echo "lld"
 	fi
 ```
-linker := env("LLVM_USE_LINKER", default_linker_arg)
-linker_arg := if linker == "" { "" } else { "-DLLVM_USE_LINKER=" + linker }
+
+export LD := env("LD ", linker)
+export CC := env("CC ", launcher + " cc")
+export CXX := env("CXX ", launcher + " c++")
+export CFLAGS := env("CFLAGS ", "-O2")
+export CXXFLAGS := env("CXXFLAGS ", "-O2")
 
 # Print recipes and exit
 default:
@@ -42,7 +45,7 @@ mingw-headers:
 	set -ex
 	mkdir -p "{{ mingw_build }}/headers"
 	cd "{{ mingw_build }}/headers"
-	{{ mingw_src }}/mingw-w64-headers/configure \
+	"{{ mingw_src }}/mingw-w64-headers/configure" \
 		--prefix={{ mingw_bootstrap }}/{{ mingw_arch }} \
 		--host={{ mingw_arch }} \
 		--with-default-msvcrt=msvcrt-os
@@ -55,26 +58,26 @@ mingw-gcc:
 	mkdir -p "{{ mingw_gcc_build }}"
 	cd "{{ mingw_gcc_build }}"
 	"{{ source_dir }}"/configure \
-        --prefix={{ mingw_bootstrap }} \
-        --with-sysroot={{ mingw_bootstrap }} \
-        --target={{ mingw_arch }} \
-        --enable-static \
-        --disable-shared \
-        --with-pic \
-        --enable-languages=c,c++,fortran \
-        --enable-libgomp \
-        --enable-threads=posix \
-        --enable-version-specific-runtime-libs \
-        --disable-dependency-tracking \
-        --disable-nls \
-        --disable-lto \
-        --disable-multilib \
-        CFLAGS_FOR_TARGET="-Os" \
-        CXXFLAGS_FOR_TARGET="-Os" \
-        LDFLAGS_FOR_TARGET="-s" \
-        CFLAGS="-Os" \
-        CXXFLAGS="-Os" \
-        LDFLAGS="-s"
+		"--prefix={{ mingw_bootstrap }}" \
+		"--with-sysroot={{ mingw_bootstrap }}" \
+		"--target={{ mingw_arch }}" \
+		--enable-static \
+		--disable-shared \
+		--with-pic \
+		--enable-languages=c,c++,fortran \
+		--enable-libgomp \
+		--enable-threads=posix \
+		--enable-version-specific-runtime-libs \
+		--disable-dependency-tracking \
+		--disable-nls \
+		--disable-lto \
+		--disable-multilib \
+		CFLAGS_FOR_TARGET="-Os" \
+		CXXFLAGS_FOR_TARGET="-Os" \
+		LDFLAGS_FOR_TARGET="-s" \
+		CFLAGS="-Os" \
+		CXXFLAGS="-Os" \
+		LDFLAGS="-s"
 
 	make "-j{{ num_cpus() }}" all-gcc
 	make install-gcc
@@ -100,15 +103,15 @@ mingw-crt:
 	mkdir -p "{{ mingw_build }}/crt"
 	cd "{{ mingw_build }}/crt"
 	{{ mingw_src }}/mingw-w64-crt/configure \
-        --prefix={{ mingw_bootstrap }}/{{ mingw_arch }} \
-        --with-sysroot={{ mingw_bootstrap }}/{{ mingw_arch }} \
-        --host={{ mingw_arch }} \
-        --with-default-msvcrt=msvcrt-os \
-        --disable-dependency-tracking \
-        --disable-lib32 \
-        --enable-lib64 \
-        CFLAGS="-Os" \
-        LDFLAGS="-s" \
+		--prefix={{ mingw_bootstrap }}/{{ mingw_arch }} \
+		--with-sysroot={{ mingw_bootstrap }}/{{ mingw_arch }} \
+		--host={{ mingw_arch }} \
+		--with-default-msvcrt=msvcrt-os \
+		--disable-dependency-tracking \
+		--disable-lib32 \
+		--enable-lib64 \
+		CFLAGS="-Os" \
+		LDFLAGS="-s" \
 
 	make -j$(nproc)
 	make install
@@ -116,13 +119,13 @@ mingw-crt:
 alias cfg := configure
 
 # Configure CMake
-configure languages="c,c++,rust":
+configure target="" languages="c,c++,rust":
 	#!/bin/bash
 
 	set -ex
 
 	# Hash all configurable parts
-	hash="{{ sha256(source_dir + build_dir + languages + install_dir + linker_arg + launcher) }}"
+	hash="{{ sha256(LD + CC + CXX + CFLAGS + CXXFLAGS + source_dir + build_dir + target + languages + install_dir + launcher) }}"
 	if [ "$hash" = "$(cat '{{config_hash_file}}')" ]; then
 		echo configuration up to date, skipping
 		exit
@@ -142,11 +145,14 @@ configure languages="c,c++,rust":
 		args+=("-with-mpfr=$lib_root/mpfr/$mpfr_version")
 	fi
 
+	if [ -n "{{ target }}" ]; then
+		args+=("--target={{ target }}")
+	fi
+
 	mkdir -p "{{ build_dir }}"
 	cd "{{ build_dir }}"
 
 	"{{ source_dir }}/configure" \
-		"CC={{ launcher }} gcc" \
 		--enable-multilib \
 		"${args[@]}"
 
