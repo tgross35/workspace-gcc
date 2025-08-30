@@ -1,9 +1,26 @@
-source_dir := justfile_directory() / "gcc"
-build_dir := justfile_directory() / "gcc-build"
-install_dir := justfile_directory() / "local-install"
+# gcc configure doesn't like Windows paths
+# replace(replace(justfile_directory(), 'C:\', '/c/'), '\', '/')
+root := if os() == "windows" {
+    replace(replace(justfile_directory(), 'C:\', '/c/'), '\', '/')
+} else {
+	justfile_directory()
+}
+root_rel_build_dir := if os() == "windows" {
+	".."
+} else {
+	justfile_directory()
+}
+
+source_dir := root / "gcc"
+source_dir_rel_build_dir := root_rel_build_dir / "gcc"
+build_dir := root / "gcc-build"
+install_dir := root / "local-install"
 config_hash_file := build_dir / ".configure-hash"
 bin_dir := build_dir / "bin"
 launcher := "ccache"
+
+# default_languages := "c,c++,rust"
+default_languages := "c,c++"
 
 # Prefer mold then lld if available
 linker := ```
@@ -14,24 +31,213 @@ linker := ```
 	fi
 ```
 
-export LD := env("LD ", linker)
-export CC := env("CC ", launcher + " cc")
-export CXX := env("CXX ", launcher + " c++")
-export CFLAGS := env("CFLAGS ", "-O2")
-export CXXFLAGS := env("CXXFLAGS ", "-O2")
+# Allow overriding these via env, otherwise set defaults
+export LD := env("LD", linker)
+export CC := env("CC", launcher + " cc")
+# # export CPP := env("CPP", launcher + " cpp")
+export CXX := env("CXX", launcher + " c++")
+# export CFLAGS := env("CFLAGS", "-O2")
+# export CXXFLAGS := env("CXXFLAGS", "-O2")
+
+# CC := "fake"
+# CXX := "fake"
+CFLAGS := "fake"
+CXXFLAGS := "fake"
 
 # Print recipes and exit
 default:
-	"{{ just_executable() }}" --list
+	@echo "source: {{ source_dir }}"
+	@echo "build: {{ build_dir }}"
+	@echo "install: {{ install_dir }}"
+	@"{{ just_executable() }}" --list
 
-mingw_arch := "x86_64-w64-mingw32"
+set_bootstrap_path := "export PATH=" + mingw_bootstrap + "/bin:${PATH}"
+
+alias cfg := configure
+
+# Run configuration
+configure target="" languages=default_languages:
+	#!/bin/bash
+	set -ex
+
+	# Hash all configurable parts
+	hash="{{ sha256(LD + CC + CXX + CFLAGS + CXXFLAGS + source_dir + build_dir + target + languages + install_dir + launcher) }}"
+	if [ "$hash" = "$(cat '{{config_hash_file}}')" ]; then
+		echo configuration up to date, skipping
+		# exit
+	else
+		echo config outdated, rerunning
+	fi
+
+	args=(
+		"--with-pkgversion=Local build"
+		"--prefix={{ install_dir }}"
+		"--enable-languages={{ languages }}"
+	)
+
+	os="$(uname -o)"
+
+	if [ "$os" = "Darwin" ]; then
+		# I haven't been able to get this one working successfully
+
+		# Help the build locate required libraries
+		lib_root="/opt/homebrew/Cellar"
+		gmp_version="$(ls "$lib_root/gmp/" | head -n1)"
+		mpc_version="$(ls "$lib_root/libmpc/" | head -n1)"
+		mpfr_version="$(ls "$lib_root/mpfr/" | head -n1)"
+		args+=(
+			"--with-gmp=$lib_root/gmp/$gmp_version"
+			"--with-mpc=$lib_root/libmpc/$mpc_version"
+			"--with-mpfr=$lib_root/mpfr/$mpfr_version"
+		)
+
+		args+=("--enable-multilib")
+	elif [ "$os" = "Msys" ]; then
+		# From https://github.com/msys2/MINGW-packages/tree/52d1c20a0810167bb39a095727d327885eb6b9c8/mingw-w64-gcc
+		# and https://github.com/Martchus/PKGBUILDs/blob/88cec2bf9801ac0a322dbe03bc6cbcb6da6da61d/gcc/mingw-w64/PKGBUILD
+		# For more MinGW build debugging, see also
+		# https://sourceforge.net/p/mingw-w64/mailman/mingw-w64-public/thread/CAPMxyhJYHMKBkXDMt71j-ZpLqtzzn85ikO87imLgYEzQEHAzjw@mail.gmail.com/
+	    args+=(
+			--disable-libstdcxx-pch
+			--disable-libssp
+			--disable-multilib
+			--disable-rpath
+			--disable-win32-registry
+			--disable-nls
+			--disable-werror
+			--disable-symvers
+			--with-gnu-as
+			--with-gnu-ld
+			--with-dwarf2
+
+			--enable-static
+			# --enable-libatomic
+			--with-arch=nocona
+			# --enable-checking=yes
+			--enable-mingw-wildcard
+			--enable-fully-dynamic-string
+			# --enable-libstdcxx-backtrace=yes
+			# --enable-libstdcxx-filesystem-ts
+			# --enable-libstdcxx-time
+			# --enable-libgomp
+			--disable-libgomp
+			# --enable-threads=posix
+			# --enable-graphite
+			# --with-libiconv
+			--with-system-zlib
+			# --with-gmp=/ucrt64
+			# --with-mpfr=/ucrt64
+			# --with-mpc=/ucrt64
+			# --with-isl=/ucrt64
+			# --with-libstdcxx-zoneinfo=yes
+			--disable-libstdcxx-debug
+			# --enable-plugin
+			--with-boot-ldflags=-static-libstdc++
+			--with-stage1-ldflags=-static-libstdc++
+			--with-local-prefix=/ucrt64/local
+			--with-native-system-header-dir=/ucrt64/include
+	    )
+	else
+		args+=("--enable-multilib")
+	fi
+
+	if [ -n "{{ target }}" ]; then
+		args+=("--target={{ target }}")
+	fi
+
+	mkdir -p "{{ build_dir }}"
+	cd "{{ build_dir }}"
+
+	pwd
+	"{{ source_dir_rel_build_dir }}/configure" "${args[@]}"
+
+	printf "$hash" > "{{ config_hash_file }}"
+
+alias b := build
+
+# Build the project. Does not reconfigure
+build:
+	make -C "{{ build_dir }}" "-j{{ num_cpus() }}"
+
+# Install to the provided prefix. Does not rebuild/reconfigure
+install: build
+	make -C "{{ build_dir }}" install
+
+# Clean the build directory
+clean:
+	rm -rf "{{ build_dir }}"
+	mkdir "{{ build_dir }}"
+
+# Run tests on the specified files. Does not rebuild
+test *testfiles:
+	make -C "{{ build_dir }}" -k check "-j{{ num_cpus() }}"
+
+# Run gcc tests
+test-gcc *options:
+	make -C "{{ build_dir }}" check-gcc RUNTESTFLAGS="{{ options }}" "-j{{ num_cpus() }}"
+
+# Print the location of built binaries
+bindir:
+	echo "{{ bin_dir }}"
+
+# Launch a binary with the given name
+bin binname *binargs:
+	"{{ bin_dir }}/{{ binname }}" {{ binargs }}
+
+# Symlink configuration so C language servers work correctly
+configure-clangd: configure
+	#!/usr/bin/env sh
+	set -eaux
+	cmd_file="{{ build_dir / "compile_commands.json" }}"
+	if [ -f "$cmd_file" ]; then
+		ln -is "$cmd_file" "{{ source_dir }}"
+	else
+		echo "$cmd_file not found"
+	fi
+
+# I think the below is config from when I was attempting to cross compile.
+# Unfortunately I don't remember it ever working.
+
+mingw_arch := "x86_64-w64-mingw64"
 mingw_version := "12.0.0"
-mingw_dl := justfile_directory() / "mingw-w64.tar.bz2"
-mingw_src := justfile_directory() / "mingw-w64-v" + mingw_version
-mingw_build := justfile_directory() / "mingw-build"
-mingw_bootstrap := justfile_directory() / "bootstrap"
-mingw_prefix := justfile_directory() / "mingw-prefix"
-mingw_gcc_build := justfile_directory() / "mingw-gcc-build"
+mingw_dl := root / "mingw-w64.tar.bz2"
+mingw_src := root / "mingw-w64-v" + mingw_version
+mingw_build := root / "mingw-build"
+mingw_bootstrap := root / "bootstrap"
+mingw_prefix := root / "mingw-prefix"
+mingw_gcc_build := root / "mingw-gcc-build"
+
+configure-something-not-sure-what:
+	#!/bin/bash
+
+	{{ set_bootstrap_path }}
+	mkdir -p {{ mingw_prefix / mingw_arch / "lib" }}
+	CC={{ mingw_arch }}-gcc DESTDIR={{ mingw_prefix }}/{{ mingw_arch }}/lib/ sh {{ mingw_prefix }}/src/libmemory.c
+	ln {{ mingw_prefix }}/{{ mingw_arch }}/lib/libmemory.a /bootstrap/{{ mingw_arch }}/lib/
+	CC={{ mingw_arch }}-gcc DESTDIR={{ mingw_prefix }}/{{ mingw_arch }}/lib/ sh {{ mingw_prefix }}/src/libchkstk.S
+	ln {{ mingw_prefix }}/{{ mingw_arch }}/lib/libchkstk.a /bootstrap/{{ mingw_arch }}/lib/
+
+
+mingw-crt:
+	#!/bin/bash
+	set -ex
+
+	{{ set_bootstrap_path }}
+	mkdir -p "{{ mingw_build }}/crt"
+	cd "{{ mingw_build }}/crt"
+	{{ mingw_src }}/mingw-w64-crt/configure \
+		--prefix={{ mingw_bootstrap }}/{{ mingw_arch }} \
+		--with-sysroot={{ mingw_bootstrap }}/{{ mingw_arch }} \
+		--host={{ mingw_arch }} \
+		--with-default-msvcrt=msvcrt-os \
+		--disable-dependency-tracking \
+		--disable-lib32 \
+		--enable-lib64 \
+		CFLAGS="-Os" \
+		LDFLAGS="-s" \
+
+	make -j$(nproc)
+	make install
 
 mingw-setup:
 	#!/bin/bash
@@ -81,121 +287,3 @@ mingw-gcc:
 
 	make "-j{{ num_cpus() }}" all-gcc
 	make install-gcc
-
-set_bootstrap_path := "export PATH=" + mingw_bootstrap + "/bin:${PATH}"
-
-configure-thing:
-	#!/bin/bash
-
-	{{ set_bootstrap_path }}
-	mkdir -p {{ mingw_prefix / mingw_arch / "lib" }}
-	CC={{ mingw_arch }}-gcc DESTDIR={{ mingw_prefix }}/{{ mingw_arch }}/lib/ sh {{ mingw_prefix }}/src/libmemory.c
-	ln {{ mingw_prefix }}/{{ mingw_arch }}/lib/libmemory.a /bootstrap/{{ mingw_arch }}/lib/
-	CC={{ mingw_arch }}-gcc DESTDIR={{ mingw_prefix }}/{{ mingw_arch }}/lib/ sh {{ mingw_prefix }}/src/libchkstk.S
-	ln {{ mingw_prefix }}/{{ mingw_arch }}/lib/libchkstk.a /bootstrap/{{ mingw_arch }}/lib/
-
-
-mingw-crt:
-	#!/bin/bash
-	set -ex
-
-	{{ set_bootstrap_path }}
-	mkdir -p "{{ mingw_build }}/crt"
-	cd "{{ mingw_build }}/crt"
-	{{ mingw_src }}/mingw-w64-crt/configure \
-		--prefix={{ mingw_bootstrap }}/{{ mingw_arch }} \
-		--with-sysroot={{ mingw_bootstrap }}/{{ mingw_arch }} \
-		--host={{ mingw_arch }} \
-		--with-default-msvcrt=msvcrt-os \
-		--disable-dependency-tracking \
-		--disable-lib32 \
-		--enable-lib64 \
-		CFLAGS="-Os" \
-		LDFLAGS="-s" \
-
-	make -j$(nproc)
-	make install
-
-alias cfg := configure
-
-# Configure CMake
-configure target="" languages="c,c++,rust":
-	#!/bin/bash
-
-	set -ex
-
-	# Hash all configurable parts
-	hash="{{ sha256(LD + CC + CXX + CFLAGS + CXXFLAGS + source_dir + build_dir + target + languages + install_dir + launcher) }}"
-	if [ "$hash" = "$(cat '{{config_hash_file}}')" ]; then
-		echo configuration up to date, skipping
-		exit
-	else
-		echo config outdated, rerunning
-	fi
-
-	args=("--prefix={{ install_dir }}" "--enable-languages={{ languages }}")
-
-	if [ "$(uname -o)" = "Darwin" ]; then
-		lib_root="/opt/homebrew/Cellar"
-		gmp_version="$(ls "$lib_root/gmp/" | head -n1)"
-		mpc_version="$(ls "$lib_root/libmpc/" | head -n1)"
-		mpfr_version="$(ls "$lib_root/mpfr/" | head -n1)"
-		args+=("-with-gmp=$lib_root/gmp/$gmp_version")
-		args+=("-with-mpc=$lib_root/libmpc/$mpc_version")
-		args+=("-with-mpfr=$lib_root/mpfr/$mpfr_version")
-	fi
-
-	if [ -n "{{ target }}" ]; then
-		args+=("--target={{ target }}")
-	fi
-
-	mkdir -p "{{ build_dir }}"
-	cd "{{ build_dir }}"
-
-	"{{ source_dir }}/configure" \
-		--enable-multilib \
-		"${args[@]}"
-
-	printf "$hash" > "{{ config_hash_file }}"
-
-alias b := build
-
-# Build the project
-build:
-	make -C "{{ build_dir }}" "-j{{ num_cpus() }}"
-
-# Install to the provided prefix. Does not rebuild/reconfigure
-install: build
-	make -C "{{ build_dir }}" install
-
-# Clean the build directory
-clean:
-	rm -rf "{{ build_dir }}"
-	mkdir "{{ build_dir }}"
-
-# Run tests on the specified files. Does not rebuild
-test *testfiles:
-	make -C "{{ build_dir }}" -k check "-j{{ num_cpus() }}"
-
-# Run gcc tests
-test-gcc *options:
-	make -C "{{ build_dir }}" check-gcc RUNTESTFLAGS="{{ options }}" "-j{{ num_cpus() }}"
-
-# Print the location of built binaries
-bindir:
-	echo "{{ bin_dir }}"
-
-# Launch a binary with the given name
-bin binname *binargs:
-	"{{ bin_dir }}/{{ binname }}" {{ binargs }}
-
-# Symlink configuration so C language servers work correctly
-configure-clangd: configure
-	#!/usr/bin/env sh
-	set -eaux
-	cmd_file="{{ build_dir / "compile_commands.json" }}"
-	if [ -f "$cmd_file" ]; then
-		ln -is "$cmd_file" "{{ source_dir }}"
-	else
-		echo "$cmd_file not found"
-	fi
