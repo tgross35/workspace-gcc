@@ -97,6 +97,13 @@ configure target="" languages=default_languages:
 		# and https://github.com/Martchus/PKGBUILDs/blob/88cec2bf9801ac0a322dbe03bc6cbcb6da6da61d/gcc/mingw-w64/PKGBUILD
 		# For more MinGW build debugging, see also
 		# https://sourceforge.net/p/mingw-w64/mailman/mingw-w64-public/thread/CAPMxyhJYHMKBkXDMt71j-ZpLqtzzn85ikO87imLgYEzQEHAzjw@mail.gmail.com/
+
+		# mingw_prefix="/ucrt64"
+		# # change hardcoded /mingw prefix to the real prefix .. isn't this rubbish?
+		# # it might work at build time and could be important there but beyond that?!
+		# mingw_native_prefix=$(cygpath -am ${mingw_prefix})
+		# sed -i "s#\\/mingw\\/#${mingw_native_prefix//\//\\/}\\/#g" gcc/config/mingw/mingw32.h
+
 	    args+=(
 			--disable-libstdcxx-pch
 			--disable-libssp
