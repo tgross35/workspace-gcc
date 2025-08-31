@@ -1,5 +1,7 @@
-# gcc configure doesn't like Windows paths
-# replace(replace(justfile_directory(), 'C:\', '/c/'), '\', '/')
+set windows-shell := ["C:/msys64/msys2_shell.cmd", "-ucrt64", "-defterm", "-here", "-no-start", "-c"]
+
+# gcc configure doesn't seem to like absolute Windows paths, so we use relative
+# and forward slashes.
 root := if os() == "windows" {
     replace(replace(justfile_directory(), 'C:\', '/c/'), '\', '/')
 } else {
@@ -16,7 +18,7 @@ source_dir_rel_build_dir := root_rel_build_dir / "gcc"
 build_dir := root / "gcc-build"
 install_dir := root / "local-install"
 config_hash_file := build_dir / ".configure-hash"
-bin_dir := build_dir / "gcc"
+bin_dir := install_dir / "bin"
 bin_sfx := if os() == "windows" { ".exe" } else { "" }
 launcher := "ccache"
 
@@ -24,13 +26,7 @@ launcher := "ccache"
 default_languages := "c,c++"
 
 # Prefer mold then lld if available
-linker := ```
-	if which mold > /dev/null 2> /dev/null; then
-		echo "mold"
-	elif which lld >/dev/null 2> /dev/null; then
-		echo "lld"
-	fi
-```
+linker := `(command -v mold >/dev/null && echo mold) || (command -v lld >/dev/null && echo lld) || true`
 
 # Allow overriding these via env, otherwise set defaults
 export LD := env("LD", linker)
@@ -99,12 +95,8 @@ configure target="" languages=default_languages:
 		# For more MinGW build debugging, see also
 		# https://sourceforge.net/p/mingw-w64/mailman/mingw-w64-public/thread/CAPMxyhJYHMKBkXDMt71j-ZpLqtzzn85ikO87imLgYEzQEHAzjw@mail.gmail.com/
 
-		# mingw_prefix="/ucrt64"
-		# # change hardcoded /mingw prefix to the real prefix .. isn't this rubbish?
-		# # it might work at build time and could be important there but beyond that?!
-		# mingw_native_prefix=$(cygpath -am ${mingw_prefix})
-		# sed -i "s#\\/mingw\\/#${mingw_native_prefix//\//\\/}\\/#g" gcc/config/mingw/mingw32.h
-
+		# Some of these are disabled because they lead to an overflow error with
+		# ordinal link indices.
 	    args+=(
 			--disable-libstdcxx-pch
 			--disable-libssp
