@@ -1,3 +1,32 @@
+# Build script for all of GCC's build scripts
+#
+# Non-base deps that I have needed:
+# - binutils
+# - bison
+# - diffutils
+# - findutils
+# - flex
+# - m4
+# - make
+# - patch
+#
+# Supposedly optional but seems basically required:
+# - gmp
+# - mpc
+# - mpfr
+# - openssl (I think?)
+# - python
+#
+# Specific to Linux:
+# - gcc-multilib
+#
+# Specific to MinGW
+# - bisonc++
+#
+# Not needed but speeds up builds:
+# - ccache
+# - mold
+
 set windows-shell := ["C:/msys64/msys2_shell.cmd", "-ucrt64", "-defterm", "-here", "-no-start", "-c"]
 
 # gcc configure doesn't seem to like absolute Windows paths, so we use relative
