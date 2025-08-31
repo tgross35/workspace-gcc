@@ -203,7 +203,9 @@ test *testfiles:
 
 # Run gcc tests
 test-gcc *options:
-	make -C "{{ build_dir }}" check-gcc RUNTESTFLAGS="{{ options }}" "-j{{ num_cpus() }}"
+	# The test suntax is so confusing. Some useful tips are at
+	# https://gcc-newbies-guide.readthedocs.io/en/latest/working-with-the-testsuite.html.
+	make -C "{{ build_dir }}/gcc" check-gcc RUNTESTFLAGS="-v {{ options }}" "-j{{ num_cpus() }}"
 
 # Print the location of built binaries
 bindir:
