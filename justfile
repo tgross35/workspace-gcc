@@ -16,7 +16,8 @@ source_dir_rel_build_dir := root_rel_build_dir / "gcc"
 build_dir := root / "gcc-build"
 install_dir := root / "local-install"
 config_hash_file := build_dir / ".configure-hash"
-bin_dir := build_dir / "bin"
+bin_dir := build_dir / "gcc"
+bin_sfx := if os() == "windows" { ".exe" } else { "" }
 launcher := "ccache"
 
 # default_languages := "c,c++,rust"
@@ -64,7 +65,7 @@ configure target="" languages=default_languages:
 	hash="{{ sha256(LD + CC + CXX + CFLAGS + CXXFLAGS + source_dir + build_dir + target + languages + install_dir + launcher) }}"
 	if [ "$hash" = "$(cat '{{config_hash_file}}')" ]; then
 		echo configuration up to date, skipping
-		# exit
+		exit
 	else
 		echo config outdated, rerunning
 	fi
@@ -163,11 +164,11 @@ configure target="" languages=default_languages:
 alias b := build
 
 # Build the project. Does not reconfigure
-build:
+build: configure
 	make -C "{{ build_dir }}" "-j{{ num_cpus() }}"
 
 # Install to the provided prefix. Does not rebuild/reconfigure
-install: build
+install:
 	make -C "{{ build_dir }}" install
 
 # Clean the build directory
@@ -187,9 +188,11 @@ test-gcc *options:
 bindir:
 	echo "{{ bin_dir }}"
 
+alias r := run
+
 # Launch a binary with the given name
-bin binname *binargs:
-	"{{ bin_dir }}/{{ binname }}" {{ binargs }}
+run name *args:
+	"{{ bin_dir }}/{{ name }}{{ bin_sfx }}" {{ args }}
 
 # Symlink configuration so C language servers work correctly
 configure-clangd: configure
