@@ -96,7 +96,7 @@ configure target="" languages=default_languages:
 	fi
 
 	args=(
-		"--with-pkgversion=Local build"
+		"--with-pkgversion=Local build $(git -C "{{ source_dir }}" rev-parse HEAD)"
 		"--prefix={{ install_dir }}"
 		"--enable-languages={{ languages }}"
 	)
