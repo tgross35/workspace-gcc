@@ -26,6 +26,9 @@
 # Not needed but speeds up builds:
 # - ccache
 # - mold
+#
+# Needed for running tests:
+# - dejagnu
 
 set windows-shell := ["C:/msys64/msys2_shell.cmd", "-ucrt64", "-defterm", "-here", "-no-start", "-c"]
 
@@ -205,6 +208,10 @@ test *testfiles:
 test-gcc *options:
 	# The test suntax is so confusing. Some useful tips are at
 	# https://gcc-newbies-guide.readthedocs.io/en/latest/working-with-the-testsuite.html.
+	# I haven't been able to filter tests successfully like that describes, so I
+	# usually wind up running the whole relevant `.exp` file and using
+	# `rg 'test-name' -g '**/gcc.sum' --no-ignore -C1` to find the relevant
+	# summary files.
 	make -C "{{ build_dir }}/gcc" check-gcc RUNTESTFLAGS="-v {{ options }}" "-j{{ num_cpus() }}"
 
 # Print the location of built binaries
@@ -214,6 +221,7 @@ bindir:
 alias r := run
 
 # Launch a binary with the given name
+[no-cd]
 run name *args:
 	"{{ bin_dir }}/{{ name }}{{ bin_sfx }}" {{ args }}
 
