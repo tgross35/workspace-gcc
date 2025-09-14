@@ -1,5 +1,23 @@
 # Build script for all of GCC's build scripts
 #
+# Requires the following directory structure:
+#
+# workspace-gcc/  # name is unimportant
+#     justfile    # this file
+#     gcc/        # gcc clone
+#
+# And will create the following directories:
+# - gcc-build: the full three-stage build
+# - gcc-build-no-bootstrap: development build without bootstrap (set
+#   BOOTSTRAP=0 to use)
+# - local-install: destination of `just install`
+# - local-install-no-bootstrap: local install for BOOTSTRAP=0
+#
+# MinGW note: the out-of-the-box build is broken, some patches are needed. At
+# least "Windows: Don't ignore native system header dir" and "Windows: Don't
+# ignore native system header dir" from this list are needed:
+# <https://github.com/gcc-mirror/gcc/compare/master...tgross35:gcc:patch-win-build>
+#
 # Non-base deps that I have needed:
 # - binutils
 # - bison
@@ -41,10 +59,14 @@ root_rel_build_dir := if os() == "windows" {
 	justfile_directory()
 }
 
+# Allow disabling bootstrap by setting BOOTSTRAP=0. This uses a separate build
+# directory.
+do_bootstrap := env("DO_BOOTSTRAP", "1")
+
 source_dir := root / "gcc"
 source_dir_rel_build_dir := root_rel_build_dir / "gcc"
-build_dir := root / "gcc-build"
-install_dir := root / "local-install"
+build_dir := if do_bootstrap == "0" { root / "gcc-build-no-bootstrap" } else { root / "gcc-build" }
+install_dir := if do_bootstrap == "0" { root / "local-install-no-bootstrap" } else { root / "local-install" }
 config_hash_file := build_dir / ".configure-hash"
 bin_dir := install_dir / "bin"
 bin_sfx := if os() == "windows" { ".exe" } else { "" }
@@ -59,15 +81,10 @@ linker := `(command -v mold >/dev/null && echo mold) || (command -v lld >/dev/nu
 # Allow overriding these via env, otherwise set defaults
 export LD := env("LD", linker)
 export CC := env("CC", launcher + " cc")
-# # export CPP := env("CPP", launcher + " cpp")
 export CXX := env("CXX", launcher + " c++")
-# export CFLAGS := env("CFLAGS", "-O2")
-# export CXXFLAGS := env("CXXFLAGS", "-O2")
-
-# CC := "fake"
-# CXX := "fake"
-CFLAGS := "fake"
-CXXFLAGS := "fake"
+# Not modified/reexported but used in cache
+cflags := env("CFLAGS", "")
+cxxflags := env("CXXFLAGS", "")
 
 # Print recipes and exit
 default:
@@ -86,7 +103,7 @@ configure target="" languages=default_languages:
 	set -ex
 
 	# Hash all configurable parts
-	cfg_hash="{{ sha256(LD + CC + CXX + CFLAGS + CXXFLAGS + source_dir + build_dir + target + languages + install_dir + launcher) }}"
+	cfg_hash="{{ sha256(LD + CC + CXX + cflags + cxxflags + do_bootstrap + source_dir + build_dir + install_dir + launcher + target + languages) }}"
 	git_hash="$(git -C "{{ source_dir }}" rev-parse HEAD)"
 	hash="$cfg_hash-$git_hash"
 	if [ "$hash" = "$(cat '{{ config_hash_file }}')" ]; then
@@ -101,6 +118,8 @@ configure target="" languages=default_languages:
 		"--prefix={{ install_dir }}"
 		"--enable-languages={{ languages }}"
 	)
+
+	[ "{{ do_bootstrap }}" = "0" ] && args+=("--disable-bootstrap")
 
 	os="$(uname -o)"
 
