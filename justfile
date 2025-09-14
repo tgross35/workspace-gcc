@@ -6,18 +6,14 @@
 # - diffutils
 # - findutils
 # - flex
+# - gmp
 # - m4
 # - make
-# - patch
-#
-# Supposedly optional but seems basically required:
-# - gmp
 # - mpc
 # - mpfr
-# - openssl (I think?)
-# - python
+# - patch
 #
-# Specific to Linux:
+# Specific to Linux unless multilib is disabled:
 # - gcc-multilib
 #
 # Specific to MinGW
@@ -90,8 +86,10 @@ configure target="" languages=default_languages:
 	set -ex
 
 	# Hash all configurable parts
-	hash="{{ sha256(LD + CC + CXX + CFLAGS + CXXFLAGS + source_dir + build_dir + target + languages + install_dir + launcher) }}"
-	if [ "$hash" = "$(cat '{{config_hash_file}}')" ]; then
+	cfg_hash="{{ sha256(LD + CC + CXX + CFLAGS + CXXFLAGS + source_dir + build_dir + target + languages + install_dir + launcher) }}"
+	git_hash="$(git -C "{{ source_dir }}" rev-parse HEAD)"
+	hash="$cfg_hash-$git_hash"
+	if [ "$hash" = "$(cat '{{ config_hash_file }}')" ]; then
 		echo configuration up to date, skipping
 		exit
 	else
@@ -187,7 +185,7 @@ configure target="" languages=default_languages:
 
 alias b := build
 
-# Build the project. Does not reconfigure
+# Build the project, reconfiguring if necessary
 build: configure
 	make -C "{{ build_dir }}" "-j{{ num_cpus() }}"
 
